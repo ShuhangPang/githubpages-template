@@ -199,7 +199,7 @@ neural_network <- neuralnet(formula = f,
                             data = total_train,
                             stepmax = 1e+06,
                             hidden = c(10,5,3), 
-                            act.fct = "logistic")
+                            linear.output=T)
 plot(neural_network)
 
 #general weight
