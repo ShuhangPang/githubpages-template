@@ -1,0 +1,252 @@
+## Loading libraries 
+
+library("lubridate")
+library("tidyverse")
+library("stringr")
+library("ggplot2")
+library("neuralnet")
+library("corrplot")
+
+# My working directory for the data
+setwd("~/Desktop/GROUP PROJECT")
+
+# Read in weather data
+meteo_2017 <- read.csv("sunlab-faro-meteo-2017.csv",sep = ";")
+meteo_2016 <- read.csv("sunlab-faro-meteo-2016.csv",sep = ";")
+
+#Read in Pv data
+pvsunlab_2017 <- read.csv("sunlab-faro-pv-2017.csv",sep=";")
+pvsunlab_2016 <- read.csv("sunlab-faro-pv-2016.csv",sep=";")
+
+## Haven't included the units in the titles for now.
+
+Weather_columns <- c("Datetime","Ambient_Temperature", "Global_Radiation", "Diffuse_Radiation",
+                     "UV", "Wind_Velocity","Wind_Direction","Precipitation","Atmospheric_Pressure")
+
+
+## Loop to change all the names for the weather data, can do this also by straight assignment but this way works too for now.
+
+for(i in seq(2,length(meteo_2017))){
+  names(meteo_2017)[i] <- Weather_columns[i]
+}
+
+for(i in seq(2,length(meteo_2016))){
+  names(meteo_2016)[i] <- Weather_columns[i]
+}
+
+## To change the names of the generation data, using string replace to remove all the extra .'s and units.
+
+names(pvsunlab_2017) <- str_replace_all(names(pvsunlab_2017),c("..ºC."="",".DC..A."="",".DC..W."="",".DC..V."="","\\.\\.\\."="_"))
+names(pvsunlab_2016) <- str_replace_all(names(pvsunlab_2016),c("..ºC."="",".DC..A."="",".DC..W."="",".DC..V."="","\\.\\.\\."="_"))
+
+#change the variable type
+meteo_2017$Ambient_Temperature <- as.numeric(meteo_2017$Ambient_Temperature)
+meteo_2017$Wind_Velocity <- as.numeric(meteo_2017$Wind_Velocity)
+
+meteo_2016$Ambient_Temperature <- as.numeric(meteo_2016$Ambient_Temperature)
+meteo_2016$Wind_Velocity <- as.numeric(meteo_2016$Wind_Velocity)
+
+
+# Editing Data -----------------------------------------------------------
+
+## Adding columns for time and dates to make sorting and aggreagating the data simplier 
+
+
+meteo_2017$Datetime <- ymd_hms(meteo_2017$Datetime)
+meteo_2017$Date <- as.Date(as_date(meteo_2017$Datetime))
+meteo_2017$Hour <- hour(meteo_2017$Datetime)
+meteo_2017$Month <- month(meteo_2017$Datetime)
+meteo_2017$MDay <- mday(meteo_2017$Datetime)
+meteo_2017$Minutes <- minute(meteo_2017$Datetime)
+
+meteo_2016$Datetime <- ymd_hms(meteo_2016$Datetime)
+meteo_2016$Date <- as.Date(as_date(meteo_2016$Datetime))
+meteo_2016$Hour <- hour(meteo_2016$Datetime)
+meteo_2016$Month <- month(meteo_2016$Datetime)
+meteo_2016$MDay <- mday(meteo_2016$Datetime)
+meteo_2016$Minutes <- minute(meteo_2016$Datetime)
+
+#delete the extremely value
+meteo_2017 <- meteo_2017 %>% filter(Ambient_Temperature < 44, Ambient_Temperature > -5)
+
+## Shouldn't have a negative for radiation or values of over 2,000 really so can set these as boundaries
+
+meteo_2017 <- meteo_2017 %>% filter(Global_Radiation < 2000, Global_Radiation > -2)
+
+## Diffuse is less than global radiation but not neccessarily the largest global radiation values that lead to largest diffuse 
+## Max of about 800 
+## May not be worth removing small negatives as rest of the data maybe reasonable.
+
+meteo_2017 <- meteo_2017 %>% filter(Diffuse_Radiation < 1000, Diffuse_Radiation > -2)
+
+meteo_2017 <- meteo_2017 %>% filter(UV < 500, UV > -2)
+
+## One of these 3 removed all the data by accident, also is technically speed not velocity as doesn't have direction in one.
+
+meteo_2017 <- meteo_2017 %>% filter(Wind_Velocity < 200, Wind_Velocity > -2)
+
+meteo_2017 <- meteo_2017 %>% filter(Precipitation < 100, Precipitation > -2)
+
+meteo_2017 <- meteo_2017 %>% filter(Atmospheric_Pressure < 2000, Atmospheric_Pressure > -2)
+
+## 2016 Cleaning following the same process
+
+summary(meteo_2016)
+
+meteo_2016 <- meteo_2016 %>% filter(Ambient_Temperature < 44, Ambient_Temperature > -5)
+meteo_2016 <- meteo_2016 %>% filter(Global_Radiation < 2000, Global_Radiation > -2)
+meteo_2016 <- meteo_2016 %>% filter(Diffuse_Radiation < 1000, Diffuse_Radiation > -2)
+meteo_2016 <- meteo_2016 %>% filter(UV < 500, UV > -2)
+meteo_2016 <- meteo_2016 %>% filter(Wind_Velocity < 200, Wind_Velocity > -2)
+meteo_2016 <- meteo_2016 %>% filter(Precipitation < 100, Precipitation > -2)
+meteo_2016 <- meteo_2016 %>% filter(Atmospheric_Pressure < 2000, Atmospheric_Pressure > -2)
+
+
+#Add columns for date and time for pvsunlab_2016, delete the useless columns 
+pvsunlab_2016 = pvsunlab_2016[,c(1,19)]
+pvsunlab_2016$Datetime <- ymd_hms(pvsunlab_2016$Datetime)
+pvsunlab_2016$Date <- as.Date(as_date(pvsunlab_2016$Datetime))
+pvsunlab_2016$Year <- year(pvsunlab_2016$Datetime)
+pvsunlab_2016$Month <- month(pvsunlab_2016$Datetime)
+pvsunlab_2016$MDay <- mday(pvsunlab_2016$Datetime)
+pvsunlab_2016$Hour <- hour(pvsunlab_2016$Datetime)
+pvsunlab_2016$Minutes <- minute(pvsunlab_2016$Datetime)
+
+#Repeat the same directions for pvsunlab_2017
+#Use 2016 dataset to create the neural network
+#Add columns for date and time for pvsunlab_2016, delete the useless columns 
+pvsunlab_2017 = pvsunlab_2017[,c(1,19)]
+pvsunlab_2017$Datetime <- ymd_hms(pvsunlab_2017$Datetime)
+pvsunlab_2017$Date <- as.Date(as_date(pvsunlab_2017$Datetime))
+pvsunlab_2017$Year <- year(pvsunlab_2017$Datetime)
+pvsunlab_2017$Hour <- hour(pvsunlab_2017$Datetime)
+pvsunlab_2017$Month <- month(pvsunlab_2017$Datetime)
+pvsunlab_2017$MDay <- mday(pvsunlab_2017$Datetime)
+pvsunlab_2017$Minutes <- minute(pvsunlab_2017$Datetime)
+
+
+#combine the data
+total_2016 = full_join(pvsunlab_2016,meteo_2016)
+total_2016 <- drop_na(total_2016)
+total_2017 = full_join(pvsunlab_2017,meteo_2017)
+total_sun = full_join(total_2016,total_2017)
+total_sun <- drop_na(total_sun)
+total_sun = total_sun[,c(1,3:7,2,9:16)]
+
+#reduce the data
+ten_minutes_intervals_total <- total_sun %>% group_by(Datetime = cut(Datetime, breaks = "10 min")) %>%
+summarise(B_Optimal_Power=mean(B_Optimal_Power),Ambient_Temperature = mean(Ambient_Temperature), Global_Radiation = mean(Global_Radiation),
+          Diffuse_Radiation = mean(Diffuse_Radiation), UV = mean(UV), Wind_Velocity = mean(Wind_Velocity),
+           Wind_Direction = mean(Wind_Direction), Precipitation = mean(Precipitation), 
+          Atmospheric_Pressure = mean(Atmospheric_Pressure),count = n(), missing_time_mins = (10-n()))
+
+ten_minutes_intervals_total$Datetime <- ymd_hms(ten_minutes_intervals_total$Datetime)
+ten_minutes_intervals_total$Date <- as.Date(as_date(ten_minutes_intervals_total$Datetime))
+ten_minutes_intervals_total$Year <- year(ten_minutes_intervals_total$Datetime)
+ten_minutes_intervals_total$Month <- month(ten_minutes_intervals_total$Datetime)
+ten_minutes_intervals_total$MDay <- mday(ten_minutes_intervals_total$Datetime)
+ten_minutes_intervals_total$Hour <- hour(ten_minutes_intervals_total$Datetime)
+ten_minutes_intervals_total$Minutes <- minutes(ten_minutes_intervals_total$Datetime)
+
+sun1 <- ten_minutes_intervals_total[,c(1,14:17,2:10)]
+summary(sun1)
+#obsesve the distribution of optimal power
+hist(sun1$B_Optimal_Power)
+#delete the extreme value
+sun1 <- sun1 %>% filter(B_Optimal_Power < 243)
+
+
+#Linear regression
+#divide data into train and test dataset 
+sample <- sample(dim(sun1)[1], dim(sun1)[1] * 0.09) 
+test <- sun1[sample, ]
+train <- sun1[-sample, ]
+
+lm.fit <- glm(B_Optimal_Power~Ambient_Temperature+Global_Radiation+Diffuse_Radiation+UV+Wind_Velocity+Wind_Direction+Precipitation+Atmospheric_Pressure,data=train)
+summary(lm.fit)
+#predict values for linear regression train dataset
+pr.lm_train <- predict(lm.fit,train)
+train$predict <- pr.lm_train
+#evalute the performance
+MSE.lm_train <- sum((pr.lm_train - train$B_Optimal_Power)^2)/nrow(train)
+MAD.lm_train <- sum(abs(pr.lm_train - train$B_Optimal_Power))/nrow(train)
+
+#predict values for linear regression test dataset
+pr.lm_test<- predict(lm.fit,test)
+test$predict <- pr.lm_test
+#evalute the performance
+MSE.lm_test<- sum((pr.lm_test - test$B_Optimal_Power)^2)/nrow(test) 
+MAD.lm_test <- sum(abs(pr.lm_test - test$B_Optimal_Power))/nrow(test)
+
+
+#Neural Network
+#normalise the variables
+normalise <- function(x) {
+  return ((x-min(x))/(max(x)-min(x)))
+}
+ sun1_nor <- as.data.frame(lapply(select(sun1,-c('Month','MDay','Hour','Year','Datetime')),normalise))
+ 
+#set the test and train data
+test_sample <- sample(dim(sun1_nor)[1], dim(sun1_nor)[1] * 0.09) 
+total_test <- sun1_nor[test_sample, ]
+total_train <- sun1_nor[-test_sample, ]
+
+#start the nn
+f <- reformulate(names(sun1_nor[,2:9]), response = "B_Optimal_Power")
+neural_network <- neuralnet(formula = f, 
+                            data = total_train,
+                            stepmax = 1e+09,
+                            hidden = c(5,3), 
+                           act.fct = 'logistic')
+plot(neural_network)
+
+#general weight
+par(mfrow=c(1,1))
+gwplot(neural_network,selected.covariate = "Ambient_Temperature")
+gwplot(neural_network,selected.covariate = "Global_Radiation")
+gwplot(neural_network,selected.covariate = "Diffuse_Radiation")
+gwplot(neural_network,selected.covariate = "UV")
+gwplot(neural_network,selected.covariate = "Wind_Velocity")
+gwplot(neural_network,selected.covariate = "Wind_Direction")
+gwplot(neural_network,selected.covariate = "Precipitation")
+gwplot(neural_network,selected.covariate = "Atmosheric_Pressure")
+
+#chech the predicted result for train data in neural network 
+power_pred <- compute(neural_network,total_train[,-1])
+#recover the value of optimal power
+pr_nn <- power_pred$net.result*(max(sun1$B_Optimal_Power)-min(sun1$B_Optimal_Power))+min(sun1$B_Optimal_Power)
+test_r <- (total_train$B_Optimal_Power)*(max(sun1$B_Optimal_Power)-min(sun1$B_Optimal_Power))+min(sun1$B_Optimal_Power)
+#evalute the performance in nn
+MSE_nn <- sum((test_r - pr_nn)^2)/nrow(total_train)
+MAD.nn_train <- sum(abs(test_r - pr_nn))/nrow(total_train)
+r_1<- sum((pr_nn-mean(test_r))^2)
+r_2 <- sum((test_r-mean(test_r))^2)
+r_square <- r_1/r_2
+#compare the linear regression and nn
+print(paste(MSE.lm_train,MSE_nn))
+
+#check the predicted result for test data in neural network 
+power_pred <- compute(neural_network,total_test[,-1])
+#recover the value of optimal power
+pr_nn <- power_pred$net.result*(max(sun1$B_Optimal_Power)-min(sun1$B_Optimal_Power))+min(sun1$B_Optimal_Power)
+test_r <- (total_test$B_Optimal_Power)*(max(sun1$B_Optimal_Power)-min(sun1$B_Optimal_Power))+min(sun1$B_Optimal_Power)
+#evalute the performance
+MSE_nn_test <- sum((test_r - pr_nn)^2)/nrow(total_test)
+MAD.nn_test <- sum(abs(test_r - pr_nn))/nrow(total_test)
+r_1<- sum((pr_nn-mean(test_r))^2)
+r_2 <- sum((test_r-mean(test_r))^2)
+r_square <- r_1/r_2
+cor(test$B_Optimal_Power,test$predict)^2
+#compare linear regression and nn
+print(paste(MSE.lm_test,MSE_nn))
+
+#add the presiction result(nn) into the dataset
+test$predict_dnn <- pr_nn
+
+#plot
+test$id <- 1:dim(test)[1]
+p1<-ggplot(test, aes(x=id)) + 
+  geom_line(aes(y=B_Optimal_Power),col ='red') +
+  geom_line(aes(y=predict_dnn),col='blue')+
+  labs(x='index',y='Optimal Power(W)')
+p1
